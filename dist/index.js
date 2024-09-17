@@ -42,6 +42,7 @@ const pg_1 = require("pg");
 const uuid_1 = require("uuid");
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const bcrypt_1 = __importDefault(require("bcrypt"));
+const multer_1 = __importDefault(require("multer"));
 dotenv.config();
 const apiKey = process.env.API_KEY;
 const genAI = new generative_ai_1.GoogleGenerativeAI(apiKey);
@@ -51,6 +52,7 @@ const client = new pg_1.Client({
     connectionString: process.env.DATABASE_URL,
 });
 client.connect();
+// Middleware to authenticate JWT token
 const authenticateToken = (req, res, next) => {
     const authHeader = req.headers["authorization"];
     const token = authHeader && authHeader.split(" ")[1];
@@ -63,12 +65,15 @@ const authenticateToken = (req, res, next) => {
         next();
     });
 };
+// Function to calculate cosine similarity between two vectors
 function cosineSimilarity(vecA, vecB) {
     const dotProduct = vecA.reduce((sum, a, idx) => sum + a * vecB[idx], 0);
     const magnitudeA = Math.sqrt(vecA.reduce((sum, a) => sum + a * a, 0));
     const magnitudeB = Math.sqrt(vecB.reduce((sum, b) => sum + b * b, 0));
     return dotProduct / (magnitudeA * magnitudeB);
 }
+const upload = (0, multer_1.default)();
+// Endpoint for user login
 app.post("/login", (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     const { username, password } = req.body;
     const user = yield client.query("SELECT * FROM users WHERE name = $1", [
@@ -82,7 +87,8 @@ app.post("/login", (req, res) => __awaiter(void 0, void 0, void 0, function* () 
     const accessToken = jsonwebtoken_1.default.sign({ userId: user.rows[0].user_id }, process.env.ACCESS_TOKEN_SECRET, { expiresIn: "1h" });
     res.json({ accessToken });
 }));
-app.post("/embed", authenticateToken, (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+// Endpoint to embed text and store the embedding
+app.post("/embed", authenticateToken, upload.none(), (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         const { text } = req.body;
         const userId = req.user.userId; // Extract userId from the authenticated token
@@ -98,6 +104,7 @@ app.post("/embed", authenticateToken, (req, res) => __awaiter(void 0, void 0, vo
         res.status(500).json({ error: "Internal Server Error" });
     }
 }));
+// Endpoint to calculate similarity between input text and stored embeddings
 app.post("/similarity", authenticateToken, (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         const { text } = req.body;
@@ -112,24 +119,18 @@ app.post("/similarity", authenticateToken, (req, res) => __awaiter(void 0, void 
         res.status(500).json({ error: "Internal Server Error" });
     }
 }));
+// Endpoint to recommend similar texts based on input text
 app.post("/recommend", authenticateToken, (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         const { text } = req.body;
         const model = genAI.getGenerativeModel({ model: "text-embedding-004" });
         const result = yield model.embedContent(text);
         const targetEmbedding = result.embedding.values;
-        const queryResult = yield client.query("SELECT text, vector FROM embeddings");
-        const embeddings = queryResult.rows.map(row => ({
+        const queryResult = yield client.query("SELECT text, vector, (vector <-> $1::vector) AS distance FROM embeddings ORDER BY distance LIMIT 5", [JSON.stringify(targetEmbedding)]);
+        const recommendations = queryResult.rows.map(row => ({
             text: row.text,
-            embedding: JSON.parse(row.vector)
+            similarity: 1 - row.distance // Assuming distance is normalized, convert to similarity
         }));
-        const recommendations = embeddings
-            .map(item => ({
-            text: item.text,
-            similarity: cosineSimilarity(targetEmbedding, item.embedding)
-        }))
-            .sort((a, b) => b.similarity - a.similarity)
-            .slice(0, 5); // Limit to top 5 recommendations
         res.json(recommendations);
     }
     catch (error) {
@@ -137,6 +138,7 @@ app.post("/recommend", authenticateToken, (req, res) => __awaiter(void 0, void 0
         res.status(500).json({ error: "Internal Server Error" });
     }
 }));
+// Endpoint to create a new user
 app.post("/user", (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         const { name, password, preferences } = req.body;
@@ -150,6 +152,7 @@ app.post("/user", (req, res) => __awaiter(void 0, void 0, void 0, function* () {
         res.status(500).json({ error: "Internal Server Error" });
     }
 }));
+// Start the server
 app.listen(9000, () => {
     console.log("Server is running on port 9000");
 });

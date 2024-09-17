@@ -5,6 +5,7 @@ import { Client } from "pg";
 import { v4 as uuidv4 } from "uuid";
 import jwt from "jsonwebtoken";
 import bcrypt from "bcrypt";
+import multer from "multer";
 dotenv.config();
 
 const apiKey = process.env.API_KEY as string;
@@ -18,6 +19,7 @@ const client = new Client({
 });
 client.connect();
 
+// Middleware to authenticate JWT token
 const authenticateToken = (
   req: express.Request,
   res: express.Response,
@@ -34,6 +36,7 @@ const authenticateToken = (
   });
 };
 
+// Function to calculate cosine similarity between two vectors
 function cosineSimilarity(vecA: number[], vecB: number[]): number {
   const dotProduct = vecA.reduce((sum, a, idx) => sum + a * vecB[idx], 0);
   const magnitudeA = Math.sqrt(vecA.reduce((sum, a) => sum + a * a, 0));
@@ -41,6 +44,9 @@ function cosineSimilarity(vecA: number[], vecB: number[]): number {
   return dotProduct / (magnitudeA * magnitudeB);
 }
 
+const upload = multer();
+
+// Endpoint for user login
 app.post("/login", async (req, res) => {
   const { username, password } = req.body;
   const user = await client.query("SELECT * FROM users WHERE name = $1", [
@@ -62,7 +68,8 @@ app.post("/login", async (req, res) => {
   res.json({ accessToken });
 });
 
-app.post("/embed", authenticateToken, async (req, res) => {
+// Endpoint to embed text and store the embedding
+app.post("/embed", authenticateToken, upload.none(), async (req, res) => {
   try {
     const { text } = req.body;
     const userId = (req as any).user.userId; // Extract userId from the authenticated token
@@ -83,6 +90,7 @@ app.post("/embed", authenticateToken, async (req, res) => {
   }
 });
 
+// Endpoint to calculate similarity between input text and stored embeddings
 app.post("/similarity", authenticateToken, async (req, res) => {
   try {
     const { text } = req.body;
@@ -101,6 +109,7 @@ app.post("/similarity", authenticateToken, async (req, res) => {
   }
 });
 
+// Endpoint to recommend similar texts based on input text
 app.post("/recommend", authenticateToken, async (req, res) => {
   try {
     const { text } = req.body;
@@ -108,19 +117,15 @@ app.post("/recommend", authenticateToken, async (req, res) => {
     const result = await model.embedContent(text);
     const targetEmbedding = result.embedding.values;
 
-    const queryResult = await client.query("SELECT text, vector FROM embeddings");
-    const embeddings = queryResult.rows.map(row => ({
-      text: row.text,
-      embedding: JSON.parse(row.vector)
-    }));
+    const queryResult = await client.query(
+      "SELECT text, vector, (vector <-> $1::vector) AS distance FROM embeddings ORDER BY distance LIMIT 5",
+      [JSON.stringify(targetEmbedding)]
+    );
 
-    const recommendations = embeddings
-      .map(item => ({
-        text: item.text,
-        similarity: cosineSimilarity(targetEmbedding, item.embedding)
-      }))
-      .sort((a, b) => b.similarity - a.similarity)
-      .slice(0, 5); // Limit to top 5 recommendations
+    const recommendations = queryResult.rows.map(row => ({
+      text: row.text,
+      similarity: 1 - row.distance // Assuming distance is normalized, convert to similarity
+    }));
 
     res.json(recommendations);
   } catch (error) {
@@ -129,6 +134,7 @@ app.post("/recommend", authenticateToken, async (req, res) => {
   }
 });
 
+// Endpoint to create a new user
 app.post("/user", async (req, res) => {
   try {
     const { name, password, preferences } = req.body;
@@ -145,6 +151,7 @@ app.post("/user", async (req, res) => {
   }
 });
 
+// Start the server
 app.listen(9000, () => {
   console.log("Server is running on port 9000");
 });
