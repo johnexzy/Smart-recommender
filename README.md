@@ -170,6 +170,8 @@ This project provides a service to embed text using Google's Generative AI and s
     ]
     ```
 
+### Postman Documentation [Here](https://documenter.getpostman.com/view/9785245/2sAXqs72PA)
+
 ## License
 
 This project is licensed under the MIT License.
