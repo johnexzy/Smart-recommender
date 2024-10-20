@@ -38,6 +38,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const generative_ai_1 = require("@google/generative-ai");
 const dotenv = __importStar(require("dotenv"));
 const express_1 = __importDefault(require("express"));
+const cors_1 = __importDefault(require("cors"));
 const pg_1 = require("pg");
 const uuid_1 = require("uuid");
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
@@ -48,6 +49,9 @@ const apiKey = process.env.API_KEY;
 const genAI = new generative_ai_1.GoogleGenerativeAI(apiKey);
 const app = (0, express_1.default)();
 app.use(express_1.default.json());
+app.use((0, cors_1.default)({
+    origin: ['http://localhost:3000', 'https://yourdomain.com']
+}));
 const client = new pg_1.Client({
     connectionString: process.env.DATABASE_URL,
 });
@@ -55,13 +59,13 @@ client.connect();
 // Middleware to authenticate JWT token
 const authenticateToken = (req, res, next) => {
     const authHeader = req.headers["authorization"];
-    const token = authHeader && authHeader.split(" ")[1];
+    const token = authHeader === null || authHeader === void 0 ? void 0 : authHeader.split(" ")[1];
     if (token == null)
         return res.sendStatus(401);
     jsonwebtoken_1.default.verify(token, process.env.ACCESS_TOKEN_SECRET, (err, user) => {
         if (err)
             return res.sendStatus(403);
-        req.user = user; // Type assertion to avoid TypeScript error
+        req.user = user;
         next();
     });
 };
@@ -101,21 +105,6 @@ app.post("/embed", authenticateToken, upload.none(), (req, res) => __awaiter(voi
     }
     catch (error) {
         console.error("Error embedding text:", error);
-        res.status(500).json({ error: "Internal Server Error" });
-    }
-}));
-// Endpoint to calculate similarity between input text and stored embeddings
-app.post("/similarity", authenticateToken, (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    try {
-        const { text } = req.body;
-        const model = genAI.getGenerativeModel({ model: "text-embedding-004" });
-        const result = yield model.embedContent(text);
-        const targetEmbedding = result.embedding.values;
-        const queryResult = yield client.query("SELECT text, vector, (vector <-> $1::vector) AS distance FROM embeddings ORDER BY distance LIMIT 5", [JSON.stringify(targetEmbedding)]);
-        res.json(queryResult.rows);
-    }
-    catch (error) {
-        console.error("Error calculating similarity:", error);
         res.status(500).json({ error: "Internal Server Error" });
     }
 }));
