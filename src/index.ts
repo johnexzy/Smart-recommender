@@ -1,6 +1,7 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import * as dotenv from "dotenv";
 import express from "express";
+import cors from "cors";
 import { Client } from "pg";
 import { v4 as uuidv4 } from "uuid";
 import jwt from "jsonwebtoken";
@@ -13,6 +14,9 @@ const genAI = new GoogleGenerativeAI(apiKey);
 
 const app = express();
 app.use(express.json());
+app.use(cors({
+  origin: ['http://localhost:3000', 'https://yourdomain.com']
+}));
 
 const client = new Client({
   connectionString: process.env.DATABASE_URL as string,
@@ -26,12 +30,12 @@ const authenticateToken = (
   next: express.NextFunction
 ) => {
   const authHeader = req.headers["authorization"];
-  const token = authHeader && authHeader.split(" ")[1];
+  const token = authHeader?.split(" ")[1];
   if (token == null) return res.sendStatus(401);
 
   jwt.verify(token, process.env.ACCESS_TOKEN_SECRET as string, (err, user) => {
     if (err) return res.sendStatus(403);
-    (req as any).user = user; // Type assertion to avoid TypeScript error
+    (req as any).user = user;
     next();
   });
 };
@@ -86,25 +90,6 @@ app.post("/embed", authenticateToken, upload.none(), async (req, res) => {
     res.json({ userId, text, embedding: embedding.values });
   } catch (error) {
     console.error("Error embedding text:", error);
-    res.status(500).json({ error: "Internal Server Error" });
-  }
-});
-
-// Endpoint to calculate similarity between input text and stored embeddings
-app.post("/similarity", authenticateToken, async (req, res) => {
-  try {
-    const { text } = req.body;
-    const model = genAI.getGenerativeModel({ model: "text-embedding-004" });
-    const result = await model.embedContent(text);
-    const targetEmbedding = result.embedding.values;
-
-    const queryResult = await client.query(
-      "SELECT text, vector, (vector <-> $1::vector) AS distance FROM embeddings ORDER BY distance LIMIT 5",
-      [JSON.stringify(targetEmbedding)]
-    );
-    res.json(queryResult.rows);
-  } catch (error) {
-    console.error("Error calculating similarity:", error);
     res.status(500).json({ error: "Internal Server Error" });
   }
 });
